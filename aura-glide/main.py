@@ -2,6 +2,11 @@
 import pygame
 import sys
 import random
+import os
+import wave
+import struct
+import math
+import asyncio
 from settings import *
 from particles import ParticleSystem
 from entities import Player, Obstacle
@@ -28,18 +33,91 @@ class Game:
         self.setup_audio()
         self.setup_ui()
 
+    def generate_sound(self, filename, sound_type):
+        sample_rate = 44100
+        if sound_type == "flap":
+            duration = 0.15
+            n_samples = int(sample_rate * duration)
+            with wave.open(filename, 'w') as wav_file:
+                wav_file.setnchannels(1)
+                wav_file.setsampwidth(2)
+                wav_file.setframerate(sample_rate)
+                for i in range(n_samples):
+                    t = float(i) / sample_rate
+                    freq = 200 + (200 * (t / duration))
+                    val = int(32767.0 * 0.5 * math.sin(2.0 * math.pi * freq * t))
+                    envelope = 1.0 - (t / duration)
+                    wav_file.writeframesraw(struct.pack('<h', int(val * envelope)))
+        elif sound_type == "score":
+            duration = 0.4
+            n_samples = int(sample_rate * duration)
+            with wave.open(filename, 'w') as wav_file:
+                wav_file.setnchannels(1)
+                wav_file.setsampwidth(2)
+                wav_file.setframerate(sample_rate)
+                for i in range(n_samples):
+                    t = float(i) / sample_rate
+                    freq = 880.0
+                    envelope = math.exp(-6.0 * t) # smooth fade out
+                    val = math.sin(2.0 * math.pi * freq * t)
+                    val += 0.3 * math.sin(2.0 * math.pi * (freq * 2) * t) # subtle harmonic
+                    val = int(32767.0 * 0.15 * val * envelope)
+                    wav_file.writeframesraw(struct.pack('<h', val))
+        elif sound_type == "crash":
+            duration = 0.5
+            n_samples = int(sample_rate * duration)
+            with wave.open(filename, 'w') as wav_file:
+                wav_file.setnchannels(1)
+                wav_file.setsampwidth(2)
+                wav_file.setframerate(sample_rate)
+                for i in range(n_samples):
+                    t = float(i) / sample_rate
+                    envelope = max(0, 1.0 - (t / duration))
+                    val = int(32767.0 * 0.5 * random.uniform(-1, 1) * envelope)
+                    wav_file.writeframesraw(struct.pack('<h', val))
+        elif sound_type == "bgm":
+            duration = 4.0
+            n_samples = int(sample_rate * duration)
+            with wave.open(filename, 'w') as wav_file:
+                wav_file.setnchannels(1)
+                wav_file.setsampwidth(2)
+                wav_file.setframerate(sample_rate)
+                for i in range(n_samples):
+                    t = float(i) / sample_rate
+                    f1, f2, f3 = 130.81, 164.81, 196.00
+                    lfo = 0.5 + 0.5 * math.sin(2.0 * math.pi * 0.5 * t)
+                    val1 = math.sin(2.0 * math.pi * f1 * t)
+                    val2 = math.sin(2.0 * math.pi * f2 * t)
+                    val3 = math.sin(2.0 * math.pi * f3 * t)
+                    mixed = (val1 + val2 + val3) / 3.0
+                    val = int(32767.0 * 0.15 * mixed * lfo)
+                    wav_file.writeframesraw(struct.pack('<h', val))
+
     def setup_audio(self):
-        # Audio feature - properly structured for future integration
-        # You can add real sound files to 'assets/sounds/' and load them here:
-        # self.sounds = {
-        #     'flap': pygame.mixer.Sound('assets/sounds/flap.wav'),
-        #     'score': pygame.mixer.Sound('assets/sounds/score.wav'),
-        #     'crash': pygame.mixer.Sound('assets/sounds/crash.wav'),
-        # }
-        self.sounds = {}
-        # Play bgm natively if available
-        # pygame.mixer.music.load('assets/sounds/bgm.ogg')
-        # pygame.mixer.music.play(-1)
+        os.makedirs('assets/sounds', exist_ok=True)
+        sound_files = {
+            'flap': 'assets/sounds/flap.wav',
+            'score': 'assets/sounds/score.wav',
+            'crash': 'assets/sounds/crash.wav',
+            'bgm': 'assets/sounds/bgm.wav'
+        }
+        for name, path in sound_files.items():
+            if not os.path.exists(path):
+                self.generate_sound(path, name)
+                
+        self.sounds = {
+            'flap': pygame.mixer.Sound(sound_files['flap']),
+            'score': pygame.mixer.Sound(sound_files['score']),
+            'crash': pygame.mixer.Sound(sound_files['crash'])
+        }
+        
+        # Lower volume a bit for effects
+        for s in self.sounds.values():
+            s.set_volume(0.3)
+            
+        pygame.mixer.music.load(sound_files['bgm'])
+        pygame.mixer.music.set_volume(0.2)
+        pygame.mixer.music.play(-1)
 
     def play_sound(self, name):
         if name in self.sounds:
@@ -228,15 +306,19 @@ class Game:
 
         pygame.display.flip()
 
-    def run(self):
+    async def run(self):
         while True:
             self.handle_events()
             self.update()
             self.draw()
             self.clock.tick(FPS)
+            await asyncio.sleep(0)
 
-if __name__ == "__main__":
+async def main():
     try:
-        Game().run()
+        await Game().run()
     except Exception as e:
         print(f"Error starting game: {e}")
+
+if __name__ == "__main__":
+    asyncio.run(main())
